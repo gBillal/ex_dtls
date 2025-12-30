@@ -9,7 +9,7 @@ defmodule ExDTLS.Mixfile do
       app: :ex_dtls,
       version: @version,
       elixir: "~> 1.12",
-      compilers: [:unifex, :bundlex] ++ Mix.compilers(),
+      compilers: [:elixir_make] ++ Mix.compilers(),
       elixirc_paths: elixirc_paths(Mix.env()),
       start_permanent: Mix.env() == :prod,
       deps: deps(),
@@ -48,8 +48,7 @@ defmodule ExDTLS.Mixfile do
 
   defp deps do
     [
-      {:unifex, "~> 1.0"},
-      {:bundlex, "~> 1.5.3"},
+      {:elixir_make, "~> 0.9", runtime: false},
       {:ex_doc, "~> 0.29", only: :dev, runtime: false},
       {:dialyxir, "~> 1.0", only: :dev, runtime: false},
       {:credo, "~> 1.7", only: :dev, runtime: false},

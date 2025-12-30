@@ -64,10 +64,16 @@ defmodule ExDTLS do
 
     cond do
       opts[:pkey] == nil and opts[:cert] == nil ->
-        Native.init(mode, srtp, verify_peer)
+        Native.init(mode, bool_to_int(srtp), bool_to_int(verify_peer))
 
       opts[:pkey] != nil and opts[:cert] != nil ->
-        Native.init_from_key_cert(mode, srtp, verify_peer, opts[:pkey], opts[:cert])
+        Native.init_from_key_cert(
+          mode,
+          bool_to_int(srtp),
+          bool_to_int(verify_peer),
+          opts[:pkey],
+          opts[:cert]
+        )
 
       true ->
         raise ArgumentError, """
@@ -205,4 +211,7 @@ defmodule ExDTLS do
   """
   @spec close(dtls()) :: {:ok, packets :: [binary()]}
   defdelegate close(dtls), to: Native, as: :exd_close
+
+  defp bool_to_int(true), do: 1
+  defp bool_to_int(false), do: 0
 end
