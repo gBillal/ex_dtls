@@ -934,24 +934,26 @@ static int load(ErlNifEnv *env, void **priv_data, ERL_NIF_TERM load_info) {
   DTLS_RESOURCE_TYPE =
       enif_open_resource_type(env, NULL, "dtls_state", dtls_state_dtor,
                               ERL_NIF_RT_CREATE | ERL_NIF_RT_TAKEOVER, NULL);
-
+#ifdef _WIN32
+  srand((unsigned int)time(NULL));
+#else
   FILE *urandom = fopen("/dev/urandom", "r");
   if (urandom == NULL) {
     DEBUG("Cannot open /dev/urandom");
     return -1;
   }
-
+  
   unsigned int seed;
   int bytes = fread(&seed, sizeof(unsigned int), 1, urandom);
   if (bytes != 1) {
     DEBUG("Cannot read random bytes from /dev/urandom");
     return -1;
   }
-
+    
   DEBUG("Random seed: %u\n", seed);
-
+    
   srand(seed);
-
+#endif
   return 0;
 }
 
