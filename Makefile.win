@@ -1,8 +1,8 @@
 PRIV_DIR = $(MIX_APP_PATH)/priv
 EX_DTLS_NIF_SO = $(PRIV_DIR)/libdtls.dll
 
-!IF "$(OPENSSL_DIR)" == ""
-OPENSSL_DIR = "C:/Program Files/OpenSSL"
+!IFNDEF $(OPENSSL_DIR)
+!ERROR "OPENSSL_DIR is not defined. Please set the path to your OpenSSL installation."
 !ENDIF
 
 OPENSSL_INCLUDE_DIR = $(OPENSSL_DIR)/include

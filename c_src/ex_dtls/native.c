@@ -2,50 +2,25 @@
 
 ErlNifResourceType *DTLS_RESOURCE_TYPE;
 
+static ERL_NIF_TERM am_ok;
+static ERL_NIF_TERM am_error;
+
 struct Datagram {
   ErlNifBinary *packet;
   struct Datagram *next;
 };
 
-int nif_get_string(ERL_NIF_TERM arg, char **data, int *size) {
-  ErlNifBinary bin;
-  if (!enif_inspect_binary(NULL, arg, &bin)) {
-    return 0;
-  }
-
-  *size = bin.size;
-  *data = (char *)malloc(bin.size + 1);
-  memcpy(*data, bin.data, bin.size);
-  (*data)[bin.size] = '\0';
-
-  return 1;
-}
-
-int nif_get_atom(ERL_NIF_TERM arg, char **data, int *size) {
-  if (!enif_get_atom_length(NULL, arg, size, ERL_NIF_LATIN1)) {
-    return 0;
-  }
-
-  *data = (char *)malloc(*size + 1);
-  if (!enif_get_atom(NULL, arg, *data, *size + 1, ERL_NIF_LATIN1)) {
-    free(*data);
-    return 0;
-  }
-
-  return 1;
-}
-
-ERL_NIF_TERM nif_raise(ErlNifEnv *env, const char *msg) {
-  ERL_NIF_TERM err_reason = enif_make_string(env, msg, ERL_NIF_LATIN1);
-  return enif_raise_exception(env, err_reason);
-}
+int nif_get_string(ERL_NIF_TERM arg, char **data, int *size);
+int nif_get_atom(ERL_NIF_TERM arg, char **data, int *size);
+ERL_NIF_TERM nif_raise(ErlNifEnv *env, const char *msg);
+ERL_NIF_TERM nif_list(ErlNifEnv *env, ErlNifBinary **payloads, int size);
+ERL_NIF_TERM make_binary(ErlNifEnv *env, const char *data, int size);
 
 static void ssl_info_cb(const SSL *ssl, int where, int ret);
 static int verify_cb(int preverify_ok, X509_STORE_CTX *ctx);
 static int read_pending_data(ErlNifBinary ***payloads, int *size, State *state);
-static void cert_to_payload(ErlNifEnv *env, X509 *x509, ErlNifBinary *payload);
-static void pkey_to_payload(ErlNifEnv *env, EVP_PKEY *pkey,
-                            ErlNifBinary *payload);
+static ERL_NIF_TERM cert_to_payload(ErlNifEnv *env, X509 *x509);
+static ERL_NIF_TERM pkey_to_payload(ErlNifEnv *env, EVP_PKEY *pkey);
 
 ERL_NIF_TERM do_init(ErlNifEnv *env, char *mode, int dtls_srtp, int verify_peer,
                      EVP_PKEY *pkey, X509 *x509);
@@ -84,16 +59,13 @@ ERL_NIF_TERM init(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[]) {
 
   EVP_PKEY *pkey = gen_key();
   if (pkey == NULL) {
-    err_reason =
-        enif_make_string(env, "Cannot generate key pair", ERL_NIF_LATIN1);
-    res_term = enif_raise_exception(env, err_reason);
+    res_term = nif_raise(env, "Cannot generate key pair");
     goto exit;
   }
 
   X509 *x509 = gen_cert(pkey, -31536000L, 31536000L);
   if (x509 == NULL) {
-    err_reason = enif_make_string(env, "Cannot generate cert", ERL_NIF_LATIN1);
-    res_term = enif_raise_exception(env, err_reason);
+    res_term = nif_raise(env, "Cannot generate cert");
     goto exit;
   }
 
@@ -139,15 +111,13 @@ ERL_NIF_TERM init_from_key_cert(ErlNifEnv *env, int argc,
 
   EVP_PKEY *evp_pkey = decode_pkey(pkey, pkey_size);
   if (evp_pkey == NULL) {
-    err_reason = enif_make_string(env, "Cannot decode pkey", ERL_NIF_LATIN1);
-    res_term = enif_raise_exception(env, err_reason);
+    res_term = nif_raise(env, "Cannot decode pkey");
     goto exit;
   }
 
   X509 *x509 = decode_cert(cert, cert_size);
   if (x509 == NULL) {
-    err_reason = enif_make_string(env, "Cannot decode cert", ERL_NIF_LATIN1);
-    res_term = enif_raise_exception(env, err_reason);
+    res_term = nif_raise(env, "Cannot decode cert");
     goto exit;
   }
 
@@ -178,21 +148,13 @@ ERL_NIF_TERM generate_key_cert(ErlNifEnv *env, int argc,
     return enif_make_badarg(env);
   }
 
-  ErlNifBinary pkey_payload;
-  ErlNifBinary cert_payload;
-
   EVP_PKEY *pkey = gen_key();
   X509 *cert = gen_cert(pkey, (long)not_before, (long)not_after);
 
-  pkey_to_payload(env, pkey, &pkey_payload);
-  cert_to_payload(env, cert, &cert_payload);
-
-  ERL_NIF_TERM pkey_term = enif_make_binary(env, &pkey_payload);
-  ERL_NIF_TERM cert_term = enif_make_binary(env, &cert_payload);
+  ERL_NIF_TERM pkey_term = pkey_to_payload(env, pkey);
+  ERL_NIF_TERM cert_term = cert_to_payload(env, cert);
   ERL_NIF_TERM res_term = enif_make_tuple2(env, pkey_term, cert_term);
 
-  enif_release_binary(&pkey_payload);
-  enif_release_binary(&cert_payload);
   return res_term;
 }
 
@@ -206,11 +168,7 @@ ERL_NIF_TERM get_pkey(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[]) {
     return enif_make_badarg(env);
   }
 
-  ErlNifBinary payload;
-  pkey_to_payload(env, state->pkey, &payload);
-  ERL_NIF_TERM res_term = enif_make_binary(env, &payload);
-  enif_release_binary(&payload);
-  return res_term;
+  return pkey_to_payload(env, state->pkey);
 }
 
 ERL_NIF_TERM get_cert(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[]) {
@@ -223,11 +181,7 @@ ERL_NIF_TERM get_cert(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[]) {
     return enif_make_badarg(env);
   }
 
-  ErlNifBinary payload;
-  cert_to_payload(env, state->x509, &payload);
-  ERL_NIF_TERM res_term = enif_make_binary(env, &payload);
-  enif_release_binary(&payload);
-  return res_term;
+  return cert_to_payload(env, state->x509);
 }
 
 ERL_NIF_TERM get_peer_cert(ErlNifEnv *env, int argc,
@@ -250,15 +204,10 @@ ERL_NIF_TERM get_peer_cert(ErlNifEnv *env, int argc,
 #endif
 
   if (x509 != NULL) {
-    ErlNifBinary payload;
-    cert_to_payload(env, x509, &payload);
-    res_term = enif_make_binary(env, &payload);
-    enif_release_binary(&payload);
-
+    res_term = cert_to_payload(env, x509);
 #if OPENSSL_VERSION_NUMBER < 0x30000000L
     X509_free(x509);
 #endif
-
   } else {
     res_term = enif_make_atom(env, "nil");
   }
@@ -290,14 +239,8 @@ ERL_NIF_TERM get_cert_fingerprint(ErlNifEnv *env, int argc,
   if (X509_digest(x509, EVP_sha256(), md, &size) != 1) {
     return nif_raise(env, "Can't get cert fingerprint");
   }
-  ErlNifBinary payload;
-  enif_alloc_binary(size, &payload);
-  memcpy(payload.data, md, size);
-  payload.size = size;
-  res_term = enif_make_binary(env, &payload);
-  enif_release_binary(&payload);
-exit:
-  return res_term;
+
+  return make_binary(env, md, size);
 }
 
 ERL_NIF_TERM do_handshake(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[]) {
@@ -311,8 +254,7 @@ ERL_NIF_TERM do_handshake(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[]) {
   }
 
   if (state->closed == 1) {
-    return enif_make_tuple2(env, enif_make_atom(env, "error"),
-                            enif_make_atom(env, "closed"));
+    return enif_make_tuple2(env, am_error, enif_make_atom(env, "closed"));
   }
 
   SSL_do_handshake(state->ssl);
@@ -328,14 +270,9 @@ ERL_NIF_TERM do_handshake(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[]) {
   } else {
     int timeout = get_timeout(state->ssl);
 
-    ERL_NIF_TERM list = enif_make_list(env, 0);
-    for (int i = gen_packets_size - 1; i >= 0; i--) {
-      list =
-          enif_make_list_cell(env, enif_make_binary(env, gen_packets[i]), list);
-    }
-
-    ERL_NIF_TERM res_term = enif_make_tuple3(env, enif_make_atom(env, "ok"),
-                                             list, enif_make_int(env, timeout));
+    ERL_NIF_TERM res_term = enif_make_tuple3(
+        env, am_ok, nif_list(env, gen_packets, gen_packets_size),
+        enif_make_int(env, timeout));
     free_payload_array(gen_packets, gen_packets_size);
     return res_term;
   }
@@ -358,13 +295,12 @@ ERL_NIF_TERM write_data(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[]) {
 
   if (state->closed == 1) {
     DEBUG("Cannot write, connection closed");
-    return enif_make_tuple2(env, enif_make_atom(env, "error"),
-                            enif_make_atom(env, "closed"));
+    return enif_make_tuple2(env, am_error, enif_make_atom(env, "closed"));
   }
 
   if (state->hsk_finished != 1) {
     DEBUG("Cannot write, handshake not finished");
-    return enif_make_tuple2(env, enif_make_atom(env, "error"),
+    return enif_make_tuple2(env, am_error,
                             enif_make_atom(env, "handshake_not_finished"));
   }
 
@@ -391,14 +327,8 @@ ERL_NIF_TERM write_data(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[]) {
     return nif_raise(env, "Couldn't read pending data after writing");
   }
 
-  ERL_NIF_TERM list = enif_make_list(env, 0);
-  for (int i = gen_packets_size - 1; i >= 0; i--) {
-    list =
-        enif_make_list_cell(env, enif_make_binary(env, gen_packets[i]), list);
-  }
-
-  ERL_NIF_TERM res_term =
-      enif_make_tuple2(env, enif_make_atom(env, "ok"), list);
+  ERL_NIF_TERM list = nif_list(env, gen_packets, gen_packets_size);
+  ERL_NIF_TERM res_term = enif_make_tuple2(env, am_ok, list);
   free_payload_array(gen_packets, gen_packets_size);
 
   return res_term;
@@ -420,8 +350,7 @@ ERL_NIF_TERM handle_data(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[]) {
   }
 
   if (state->closed == 1) {
-    return enif_make_tuple2(env, enif_make_atom(env, "error"),
-                            enif_make_atom(env, "closed"));
+    return enif_make_tuple2(env, am_error, enif_make_atom(env, "closed"));
   }
 
   if (payload.size != 0) {
@@ -470,16 +399,14 @@ ERL_NIF_TERM do_init(ErlNifEnv *env, char *mode_str, int dtls_srtp,
   } else if (strcmp(mode_str, "server") == 0) {
     mode = MODE_SERVER;
   } else {
-    err_reason = enif_make_string(env, "Invalid DTLS mode", ERL_NIF_LATIN1);
-    res_term = enif_raise_exception(env, err_reason);
+    res_term = nif_raise(env, "Invalid DTLS mode");
     goto exit;
   }
   state->mode = mode;
 
   state->ssl_ctx = create_ctx(dtls_srtp);
   if (state->ssl_ctx == NULL) {
-    err_reason = enif_make_string(env, "Cannot create ssl_ctx", ERL_NIF_LATIN1);
-    res_term = enif_raise_exception(env, err_reason);
+    res_term = nif_raise(env, "Cannot create ssl_ctx");
     goto exit;
   }
 
@@ -491,23 +418,19 @@ ERL_NIF_TERM do_init(ErlNifEnv *env, char *mode_str, int dtls_srtp,
 
   state->pkey = pkey;
   if (SSL_CTX_use_PrivateKey(state->ssl_ctx, state->pkey) != 1) {
-    err_reason =
-        enif_make_string(env, "Cannot set private key", ERL_NIF_LATIN1);
-    res_term = enif_raise_exception(env, err_reason);
+    res_term = nif_raise(env, "Cannot set private key");
     goto exit;
   }
 
   state->x509 = x509;
   if (SSL_CTX_use_certificate(state->ssl_ctx, state->x509) != 1) {
-    err_reason = enif_make_string(env, "Cannot set cert", ERL_NIF_LATIN1);
-    res_term = enif_raise_exception(env, err_reason);
+    res_term = nif_raise(env, "Cannot set certificate");
     goto exit;
   }
 
   state->ssl = create_ssl(state->ssl_ctx, state->mode);
   if (state->ssl == NULL) {
-    err_reason = enif_make_string(env, "Cannot create ssl", ERL_NIF_LATIN1);
-    res_term = enif_raise_exception(env, err_reason);
+    res_term = nif_raise(env, "Cannot create ssl");
     goto exit;
   }
 
@@ -532,14 +455,12 @@ ERL_NIF_TERM exd_close(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[]) {
   }
 
   if (state->closed == 1) {
-    return enif_make_tuple2(env, enif_make_atom(env, "ok"),
-                            enif_make_list(env, 0));
+    return enif_make_tuple2(env, am_ok, enif_make_list(env, 0));
   }
 
   state->closed = 1;
   if (SSL_shutdown(state->ssl) < 0) {
-    return enif_make_tuple2(env, enif_make_atom(env, "ok"),
-                            enif_make_list(env, 0));
+    return enif_make_tuple2(env, am_ok, enif_make_list(env, 0));
   } else {
     ErlNifBinary **gen_packets = NULL;
     int gen_packets_size = 0;
@@ -548,14 +469,8 @@ ERL_NIF_TERM exd_close(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[]) {
     if (gen_packets == NULL) {
       return nif_raise(env, "Close failed: couldn't read pending data");
     } else {
-      ERL_NIF_TERM list = enif_make_list(env, 0);
-      for (int i = gen_packets_size - 1; i >= 0; i--) {
-        list = enif_make_list_cell(env, enif_make_binary(env, gen_packets[i]),
-                                   list);
-      }
-
-      ERL_NIF_TERM res_term =
-          enif_make_tuple2(env, enif_make_atom(env, "ok"), list);
+      ERL_NIF_TERM list = nif_list(env, gen_packets, gen_packets_size);
+      ERL_NIF_TERM res_term = enif_make_tuple2(env, am_ok, list);
       free_payload_array(gen_packets, gen_packets_size);
       return res_term;
     }
@@ -565,14 +480,7 @@ ERL_NIF_TERM exd_close(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[]) {
 ERL_NIF_TERM handle_regular_read(ErlNifEnv *env, State *state, char data[],
                                  int ret) {
   if (ret > 0) {
-    ErlNifBinary packets;
-    enif_alloc_binary(ret, &packets);
-    memcpy(packets.data, data, ret);
-    packets.size = (unsigned int)ret;
-    ERL_NIF_TERM res_term = enif_make_tuple2(env, enif_make_atom(env, "ok"),
-                                             enif_make_binary(env, &packets));
-    enif_release_binary(&packets);
-    return res_term;
+    return enif_make_tuple2(env, am_ok, make_binary(env, data, ret));
   }
 
   return handle_read_error(env, state, ret);
@@ -584,7 +492,7 @@ ERL_NIF_TERM handle_read_error(ErlNifEnv *env, State *state, int ret) {
   switch (error) {
   case SSL_ERROR_ZERO_RETURN:
     state->closed = 1;
-    return enif_make_tuple2(env, enif_make_atom(env, "error"),
+    return enif_make_tuple2(env, am_error,
                             enif_make_atom(env, "peer_closed_for_writing"));
   case SSL_ERROR_WANT_READ:
     DEBUG("SSL WANT READ. This is workaround. Did we get retransmission?");
@@ -595,7 +503,7 @@ ERL_NIF_TERM handle_read_error(ErlNifEnv *env, State *state, int ret) {
     if (state->hsk_finished == 0) {
       // If handshake is in-progress, return handshake error.
       // Otherwise, we failed when trying to decrypt data.
-      return enif_make_tuple2(env, enif_make_atom(env, "error"),
+      return enif_make_tuple2(env, am_error,
                               enif_make_atom(env, "handshake_error"));
     } else {
       return nif_raise(env, "SSL read error");
@@ -613,27 +521,22 @@ ERL_NIF_TERM handle_handshake_finished(ErlNifEnv *env, State *state) {
     return nif_raise(env, "Handshake failed: cannot export keying material");
   }
 
-  int len = keying_material->len;
-  ErlNifBinary client_keying_material;
-  enif_alloc_binary(len, &client_keying_material);
-  memcpy(client_keying_material.data, keying_material->client, len);
-  client_keying_material.size = len;
-
-  ErlNifBinary server_keying_material;
-  enif_alloc_binary(len, &server_keying_material);
-  memcpy(server_keying_material.data, keying_material->server, len);
-  server_keying_material.size = len;
-
   int ret = read_pending_data(&gen_packets, &gen_packets_size, state);
   if (ret < 0) {
     res_term = nif_raise(env, "Handshake failed: couldn't read pending data.");
     goto cleanup;
   }
 
+  int len = keying_material->len;
+  ERL_NIF_TERM client_keying_material =
+      make_binary(env, keying_material->client, len);
+  ERL_NIF_TERM server_keying_material =
+      make_binary(env, keying_material->server, len);
+
   state->hsk_finished = 1;
 
-  ErlNifBinary *local_keying_material;
-  ErlNifBinary *remote_keying_material;
+  ERL_NIF_TERM *local_keying_material;
+  ERL_NIF_TERM *remote_keying_material;
 
   if (state->mode == MODE_CLIENT) {
     local_keying_material = &client_keying_material;
@@ -643,22 +546,14 @@ ERL_NIF_TERM handle_handshake_finished(ErlNifEnv *env, State *state) {
     remote_keying_material = &client_keying_material;
   }
 
-  ERL_NIF_TERM list = enif_make_list(env, 0);
-  for (int i = gen_packets_size - 1; i >= 0; i--) {
-    list =
-        enif_make_list_cell(env, enif_make_binary(env, gen_packets[i]), list);
-  }
-
-  res_term = enif_make_tuple5(
-      env, enif_make_atom(env, "handshake_finished"),
-      enif_make_binary(env, local_keying_material),
-      enif_make_binary(env, remote_keying_material),
-      enif_make_int(env, keying_material->protection_profile), list);
+  res_term =
+      enif_make_tuple5(env, enif_make_atom(env, "handshake_finished"),
+                       *local_keying_material, *remote_keying_material,
+                       enif_make_int(env, keying_material->protection_profile),
+                       nif_list(env, gen_packets, gen_packets_size));
 
 cleanup:
   free_payload_array(gen_packets, gen_packets_size);
-  enif_release_binary(&client_keying_material);
-  enif_release_binary(&server_keying_material);
   return res_term;
 }
 
@@ -678,14 +573,9 @@ ERL_NIF_TERM handle_handshake_in_progress(ErlNifEnv *env, State *state,
       return enif_make_atom(env, "handshake_want_read");
     } else {
       int timeout = get_timeout(state->ssl);
-      ERL_NIF_TERM list = enif_make_list(env, 0);
-      for (int i = gen_packets_size - 1; i >= 0; i--) {
-        list = enif_make_list_cell(env, enif_make_binary(env, gen_packets[i]),
-                                   list);
-      }
-
       ERL_NIF_TERM res_term =
-          enif_make_tuple3(env, enif_make_atom(env, "handshake_packets"), list,
+          enif_make_tuple3(env, enif_make_atom(env, "handshake_packets"),
+                           nif_list(env, gen_packets, gen_packets_size),
                            enif_make_int(env, timeout));
 
       free_payload_array(gen_packets, gen_packets_size);
@@ -709,13 +599,12 @@ ERL_NIF_TERM handle_timeout(ErlNifEnv *env, int argc,
   }
 
   if (state->closed == 1) {
-    return enif_make_tuple2(env, enif_make_atom(env, "error"),
-                            enif_make_atom(env, "closed"));
+    return enif_make_tuple2(env, am_error, enif_make_atom(env, "closed"));
   }
 
   long result = DTLSv1_handle_timeout(state->ssl);
   if (result != 1)
-    return enif_make_atom(env, "ok");
+    return am_ok;
 
   ErlNifBinary **gen_packets = NULL;
   int gen_packets_size = 0;
@@ -726,14 +615,9 @@ ERL_NIF_TERM handle_timeout(ErlNifEnv *env, int argc,
                      "Retransmit handshake failed: couldn't read pending data");
   } else {
     int timeout = get_timeout(state->ssl);
-    ERL_NIF_TERM list = enif_make_list(env, 0);
-    for (int i = gen_packets_size - 1; i >= 0; i--) {
-      list =
-          enif_make_list_cell(env, enif_make_binary(env, gen_packets[i]), list);
-    }
-
     ERL_NIF_TERM res_term =
-        enif_make_tuple3(env, enif_make_atom(env, "retransmit"), list,
+        enif_make_tuple3(env, enif_make_atom(env, "retransmit"),
+                         nif_list(env, gen_packets, gen_packets_size),
                          enif_make_int(env, timeout));
 
     free_payload_array(gen_packets, gen_packets_size);
@@ -882,21 +766,87 @@ static void free_payload_array(ErlNifBinary **payloads, int len) {
   free(payloads);
 }
 
-static void pkey_to_payload(ErlNifEnv *env, EVP_PKEY *pkey,
-                            ErlNifBinary *payload) {
+static ERL_NIF_TERM pkey_to_payload(ErlNifEnv *env, EVP_PKEY *pkey) {
+  ErlNifBinary payload;
+  ERL_NIF_TERM res;
+
   int len = i2d_PrivateKey(pkey, NULL);
-  enif_alloc_binary(len, payload);
-  unsigned char *p = payload->data;
+  enif_alloc_binary(len, &payload);
+
+  unsigned char *p = payload.data;
   i2d_PrivateKey(pkey, &p);
-  payload->size = len;
+  payload.size = len;
+
+  res = enif_make_binary(env, &payload);
+  enif_release_binary(&payload);
+  return res;
 }
 
-static void cert_to_payload(ErlNifEnv *env, X509 *x509, ErlNifBinary *payload) {
+static ERL_NIF_TERM cert_to_payload(ErlNifEnv *env, X509 *x509) {
+  ERL_NIF_TERM res;
+  ErlNifBinary payload;
+
   int len = i2d_X509(x509, NULL);
-  enif_alloc_binary(len, payload);
-  unsigned char *p = payload->data;
+  enif_alloc_binary(len, &payload);
+  unsigned char *p = payload.data;
   i2d_X509(x509, &p);
-  payload->size = len;
+  payload.size = len;
+
+  res = enif_make_binary(env, &payload);
+  enif_release_binary(&payload);
+  return res;
+}
+
+// Nif helpers
+int nif_get_string(ERL_NIF_TERM arg, char **data, int *size) {
+  ErlNifBinary bin;
+  if (!enif_inspect_binary(NULL, arg, &bin)) {
+    return 0;
+  }
+
+  *size = bin.size;
+  *data = (char *)malloc(bin.size + 1);
+  memcpy(*data, bin.data, bin.size);
+  (*data)[bin.size] = '\0';
+
+  return 1;
+}
+
+int nif_get_atom(ERL_NIF_TERM arg, char **data, int *size) {
+  if (!enif_get_atom_length(NULL, arg, size, ERL_NIF_LATIN1)) {
+    return 0;
+  }
+
+  *data = (char *)malloc(*size + 1);
+  if (!enif_get_atom(NULL, arg, *data, *size + 1, ERL_NIF_LATIN1)) {
+    free(*data);
+    return 0;
+  }
+
+  return 1;
+}
+
+ERL_NIF_TERM nif_raise(ErlNifEnv *env, const char *msg) {
+  ERL_NIF_TERM err_reason = enif_make_string(env, msg, ERL_NIF_LATIN1);
+  return enif_raise_exception(env, err_reason);
+}
+
+ERL_NIF_TERM nif_list(ErlNifEnv *env, ErlNifBinary **payloads, int count) {
+  ERL_NIF_TERM list = enif_make_list(env, 0);
+  for (int i = count - 1; i >= 0; i--) {
+    list = enif_make_list_cell(env, enif_make_binary(env, payloads[i]), list);
+  }
+  return list;
+}
+
+ERL_NIF_TERM make_binary(ErlNifEnv *env, const char *data, int size) {
+  ErlNifBinary payload;
+  enif_alloc_binary(size, &payload);
+  memcpy(payload.data, data, size);
+  payload.size = size;
+  ERL_NIF_TERM res = enif_make_binary(env, &payload);
+  enif_release_binary(&payload);
+  return res;
 }
 
 void dtls_state_dtor(ErlNifEnv *env, void *obj) {
@@ -942,18 +892,22 @@ static int load(ErlNifEnv *env, void **priv_data, ERL_NIF_TERM load_info) {
     DEBUG("Cannot open /dev/urandom");
     return -1;
   }
-  
+
   unsigned int seed;
   int bytes = fread(&seed, sizeof(unsigned int), 1, urandom);
   if (bytes != 1) {
     DEBUG("Cannot read random bytes from /dev/urandom");
     return -1;
   }
-    
+
   DEBUG("Random seed: %u\n", seed);
-    
+
   srand(seed);
 #endif
+
+  am_ok = enif_make_atom(env, "ok");
+  am_error = enif_make_atom(env, "error");
+
   return 0;
 }
 

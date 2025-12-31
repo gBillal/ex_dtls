@@ -1,7 +1,7 @@
 #pragma once
 
-#include <erl_nif.h>
 #include "dtls.h"
+#include <erl_nif.h>
 
 typedef struct State State;
 

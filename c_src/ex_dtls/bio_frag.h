@@ -1,5 +1,5 @@
-#include <openssl/opensslv.h>
 #include <openssl/err.h>
+#include <openssl/opensslv.h>
 #include <openssl/ssl.h>
 
 #include "log.h"
